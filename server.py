@@ -20,36 +20,36 @@ logger = logging.getLogger(__name__)
 
 async def archive(request):
     cwd = Path.cwd()
-    archive_hash = request.match_info.get('archive_hash', '')
-    if Path(cwd / PHOTOS_DIRECTORY / archive_hash).exists():
-        response = web.StreamResponse()
-        response.headers['Content-Type'] = 'text/html'
-        response.headers['Content-Disposition'] = f'attachment;filename="archive_{archive_hash}.zip"'
-        await response.prepare(request)
-        files = await create_subprocess_exec("zip", "-r", "-", ".",
-                                             stdout=asyncio.subprocess.PIPE, cwd=cwd / PHOTOS_DIRECTORY / archive_hash)
-        try:
-            while True:
-                data = await files.stdout.read(CHUNK_SIZE)
-                if files.stdout.at_eof():
-                    logger.info("Download complete")
-                    break
-                await response.write(data)
-                logger.info("Sending archive chunk ...")
-                await asyncio.sleep(INTERVAL_SECS)
-        except asyncio.CancelledError:
-            logger.warning("Download cancelled")
-        except ConnectionError:
-            logger.warning("Connection error")
-        except (BaseException, Exception):
-            logger.error("Unexpected error")
-        finally:
-            await kill_process(files)
-        return response
-
-    else:
+    archive_hash = request.match_info['archive_hash']
+    logger.info("archive_hash=%s.", archive_hash)
+    if not Path(cwd / PHOTOS_DIRECTORY / archive_hash).exists():
         logger.warning("Can't find path to archive")
         return web.HTTPNotFound(text="Архив не существует или был удален")
+    response = web.StreamResponse()
+    response.headers['Content-Type'] = 'text/html'
+    response.headers['Content-Disposition'] = f'attachment;filename="archive_{archive_hash}.zip"'
+    await response.prepare(request)
+    files = await create_subprocess_exec("zip", "-r", "-", ".",
+                                         stdout=asyncio.subprocess.PIPE, cwd=cwd / PHOTOS_DIRECTORY / archive_hash)
+    try:
+        while True:
+            data = await files.stdout.read(CHUNK_SIZE)
+            if files.stdout.at_eof():
+                logger.info("Download complete")
+                break
+            await response.write(data)
+            logger.info("Sending archive chunk ...")
+            await asyncio.sleep(INTERVAL_SECS)
+    except asyncio.CancelledError:
+        logger.warning("Download cancelled")
+        raise
+    except ConnectionError:
+        logger.warning("Connection error")
+    except (BaseException, Exception):
+        logger.error("Unexpected error")
+    finally:
+        await kill_process(files)
+    return response
 
 
 async def handle_index_page(request):
@@ -61,10 +61,9 @@ async def handle_index_page(request):
 async def kill_process(process):
     try:
         process.kill()
-        logger.info(f"Process with {process.pid} killed")
+        logger.info(f"Process with id {process.pid} was killed")
     except OSError as e:
         logger.error(f"Ошибка при завершении процесса PID {process.pid}: {e}")
-
 
 
 if __name__ == '__main__':
@@ -86,4 +85,3 @@ if __name__ == '__main__':
         web.get('/archive/{archive_hash}/', archive),
     ])
     web.run_app(app)
-
